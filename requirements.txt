@@ -1,0 +1,29 @@
+# NAS 접근 및 SMB 프로토콜
+smbprotocol>=1.16.0
+
+# 검색 엔진 (Elasticsearch 8.11.0과 호환)
+elasticsearch>=8.0,<9.0
+
+# 파일 포맷 처리 (문서 인덱싱)
+PyPDF2>=3.0.1
+python-pptx>=0.6.21
+openpyxl>=3.0.0
+python-docx>=0.8.11
+
+# AI API 클라이언트
+anthropic>=0.29.0  # Claude API
+google-generativeai>=0.3.0  # Gemini API
+
+# 설정 관리
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+
+# 로깅 및 유틸리티
+python-json-logger>=2.0.7
+
+# 개발 도구
+pytest>=7.4.3
+pytest-asyncio>=0.23.2
+black>=23.12.0
+flake8>=6.1.0
+mypy>=1.7.1
