@@ -12,9 +12,10 @@ from pathlib import Path
 from enum import Enum
 
 try:
-    import smbprotocol
+    import smbclient
+    import smbclient.shutil
 except ImportError:
-    smbprotocol = None
+    smbclient = None
 
 from .config import NASConfig, Config
 
@@ -125,7 +126,7 @@ class NASCrawler:
     def connect(self) -> bool:
         """
         NAS에 접속 (SMB 또는 로컬 경로)
-        
+
         Returns:
             bool: 성공 여부
         """
@@ -137,15 +138,26 @@ class NASCrawler:
                 self.is_local_path = True
                 self.local_path = local_path
                 return True
-            
+
             # SMB 연결 시도
+            if smbclient is None:
+                logger.error("smbclient not installed. Run: pip install smbprotocol")
+                return False
+
             logger.info(f"Connecting to NAS: {self.config.name} ({self.config.host})")
-            
-            # SMB 연결 테스트
-            path = f"//{self.config.host}/{self.config.share}"
-            # 실제 구현: smbprotocol을 통한 연결
-            
-            logger.info(f"Successfully connected to {self.config.name}")
+
+            smbclient.register_session(
+                self.config.host,
+                username=self.config.username,
+                password=self.config.password,
+            )
+
+            # 연결 확인: 공유 루트 접근 테스트
+            smb_root = f"\\\\{self.config.host}\\{self.config.share}"
+            smbclient.listdir(smb_root)
+
+            self.smb_base = smb_root
+            logger.info(f"Successfully connected to {self.config.name} ({smb_root})")
             return True
         except Exception as e:
             logger.error(f"Failed to connect to NAS {self.config.name}: {str(e)}")
@@ -156,6 +168,41 @@ class NASCrawler:
         ext = Path(filename).suffix.lower().lstrip(".")
         return self._file_type_map.get(ext, FileType.OTHER)
     
+    def _smb_crawl(self, smb_path: str, recursive: bool = True) -> Iterator[FileMetadata]:
+        """
+        SMB 경로를 재귀적으로 탐색하며 파일 메타데이터 반환
+
+        Args:
+            smb_path: UNC 경로 (\\\\host\\share\\folder)
+            recursive: 재귀 탐색 여부
+        """
+        try:
+            entries = smbclient.scandir(smb_path)
+        except Exception as e:
+            logger.warning(f"Cannot list SMB directory {smb_path}: {str(e)}")
+            return
+
+        for entry in entries:
+            name = entry.name
+
+            # 숨김 파일/폴더 및 시스템 폴더 제외
+            if name.startswith('.') or name.lower() in ('#recycle', '@eadir', '#snapshot'):
+                continue
+
+            entry_path = f"{smb_path}\\{name}"
+
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    if recursive:
+                        yield from self._smb_crawl(entry_path, recursive=recursive)
+                else:
+                    stat = entry.stat(follow_symlinks=False)
+                    metadata = self.extract_metadata(entry_path, stat_result=stat)
+                    if metadata:
+                        yield metadata
+            except Exception as e:
+                logger.warning(f"Error processing SMB entry {entry_path}: {str(e)}")
+
     def extract_metadata(self, file_path: str, stat_result=None) -> Optional[FileMetadata]:
         """
         파일 메타데이터 추출
@@ -197,14 +244,25 @@ class NASCrawler:
         Yields:
             FileMetadata: 발견된 파일의 메타데이터
         """
-        logger.info(f"Starting crawl of {self.config.name} from {start_path}")
-        
+        # start_path 우선순위: 인자 > config.start_path > 기본값("/")
+        if start_path == "/" and self.config.start_path:
+            start_path = self.config.start_path
+
+        logger.info(f"Starting crawl of {self.config.name} from '{start_path}'")
+
         if self.is_local_path:
             # 로컬 경로 크롤링
             base_path = getattr(self, 'local_path', None)
             if not base_path:
                 return
-            
+
+            # start_path가 지정된 경우 해당 하위 폴더만 탐색
+            if start_path and start_path != "/":
+                base_path = os.path.join(base_path, start_path.lstrip("/\\"))
+                if not os.path.isdir(base_path):
+                    logger.error(f"Start path not found: {base_path}")
+                    return
+
             try:
                 for root, dirs, files in os.walk(base_path):
                     for filename in files:
@@ -225,9 +283,14 @@ class NASCrawler:
             except Exception as e:
                 logger.error(f"Local path crawl failed: {str(e)}")
         else:
-            # SMB 크롤링 (향후 구현)
-            logger.warning("SMB crawling not yet implemented")
-            pass
+            # SMB 크롤링: \\host\share[\start_path]
+            smb_base = getattr(self, 'smb_base', f"\\\\{self.config.host}\\{self.config.share}")
+            if start_path and start_path != "/":
+                sub = start_path.strip('/\\').replace('/', '\\')
+                smb_base = f"{smb_base}\\{sub}"
+
+            logger.info(f"SMB crawl path: {smb_base}")
+            yield from self._smb_crawl(smb_base, recursive=recursive)
 
 
 class MultiNASCrawler:

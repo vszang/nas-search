@@ -231,6 +231,50 @@ class FileSearcher:
             logger.error(f"Advanced search failed: {str(e)}")
             return []
     
+    def search_by_keyword(
+        self,
+        query: str,
+        file_type: Optional[str] = None,
+        max_results: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        파일명 + 내용 통합 검색 (OR 조건)
+
+        Args:
+            query: 검색 키워드
+            file_type: 파일 타입 필터 (선택사항)
+            max_results: 최대 결과 수
+
+        Returns:
+            List[Dict]: 검색 결과
+        """
+        try:
+            should_clauses = [
+                {"match": {"name":    {"query": query, "fuzziness": "AUTO", "boost": 2}}},
+                {"match": {"content": {"query": query, "fuzziness": "AUTO"}}},
+            ]
+
+            q: Dict[str, Any] = {
+                "bool": {
+                    "should": should_clauses,
+                    "minimum_should_match": 1,
+                }
+            }
+
+            if file_type:
+                q["bool"]["filter"] = {"term": {"file_type": file_type}}
+
+            response = self.client.search(
+                index=ELASTICSEARCH.index_name,
+                query=q,
+                size=max_results
+            )
+
+            return self._format_results(response)
+        except Exception as e:
+            logger.error(f"Keyword search failed: {str(e)}")
+            return []
+
     def _format_results(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Elasticsearch 응답을 표준 형식으로 변환

@@ -20,6 +20,7 @@ class NASConfig:
     username: str
     password: str
     name: str
+    start_path: str = ""  # 크롤링 시작 경로 (비어있으면 공유 루트 전체)
 
 
 @dataclass
@@ -102,7 +103,8 @@ class Config:
                 share=os.getenv(f"NAS_SHARE_{i}", "share"),
                 username=os.getenv(f"NAS_USERNAME_{i}", ""),
                 password=os.getenv(f"NAS_PASSWORD_{i}", ""),
-                name=os.getenv(f"NAS_NAME_{i}", f"NAS_{i}")
+                name=os.getenv(f"NAS_NAME_{i}", f"NAS_{i}"),
+                start_path=os.getenv(f"NAS_START_PATH_{i}", "")
             ))
         
         cls.NAS_CONFIGS = configs

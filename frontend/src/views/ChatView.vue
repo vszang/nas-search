@@ -8,15 +8,26 @@
             NAS 검색
           </v-toolbar-title>
           <template #append>
-            <v-chip 
-              v-if="isLoading" 
-              color="primary" 
-              size="small" 
-              prepend-icon="mdi-loading" 
+            <v-chip
+              v-if="isLoading"
+              color="primary"
+              size="small"
+              prepend-icon="mdi-loading"
               class="mdi-spin mr-2"
             >
               검색 중...
             </v-chip>
+            <v-select
+              v-model="selectedModel"
+              :items="models"
+              item-title="label"
+              item-value="value"
+              density="compact"
+              variant="outlined"
+              hide-details
+              style="max-width: 160px"
+              class="mr-2"
+            />
             <v-btn icon size="small" class="mr-2" @click="clearChat">
               <v-icon>mdi-delete</v-icon>
               <v-tooltip activator="parent" location="bottom">초기화</v-tooltip>
@@ -135,6 +146,12 @@ const isLoading = ref(false)
 const messagesContainer = ref<HTMLElement | null>(null)
 let messageCounter = 0
 
+const models = [
+  { label: 'Haiku (빠름/저렴)', value: 'claude-haiku-4-5-20251001' },
+  { label: 'Sonnet (고성능)', value: 'claude-sonnet-4-6' },
+]
+const selectedModel = ref('claude-haiku-4-5-20251001')
+
 const examples = [
   'Python 파일을 찾아줄래?',
   '가장 큰 파일이 뭐야?',
@@ -168,6 +185,10 @@ function scrollToBottom() {
 
 watch(messages, () => {
   scrollToBottom()
+}, { deep: true })
+
+watch(isLoading, () => {
+  scrollToBottom()
 })
 
 async function submit() {
@@ -186,7 +207,8 @@ async function sendQuery(query: string) {
   try {
     console.log('[Chat] 자연어 쿼리 전송:', query)
     const response = await axios.post('/api/chat', {
-      message: query
+      message: query,
+      model: selectedModel.value
     })
 
     console.log('[Chat] 응답:', response.data)

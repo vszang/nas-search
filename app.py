@@ -310,14 +310,15 @@ def chat():
     try:
         data = request.json
         message = data.get('message', '').strip()
-        
+        model = data.get('model', None)
+
         if not message:
             return jsonify({
                 "success": False,
                 "error": "메시지를 입력해주세요"
             }), 400
-        
-        print(f"[Chat] 사용자 메시지: {message}")
+
+        print(f"[Chat] 사용자 메시지: {message} | model={model}")
         
         # RAG를 통한 의미 기반 검색 (최적화 버전, 선택사항)
         rag_context = ""
@@ -363,7 +364,7 @@ def chat():
                 enhanced_message = message
                 if rag_context:
                     enhanced_message = f"{message}\n\n{rag_context}"
-                response = client.chat(enhanced_message)
+                response = client.chat(enhanced_message, model=model)
         except Exception as e:
             print(f"[Claude] Claude API 호출 실패: {str(e)}")
             # 폴백: 테스트 응답 생성

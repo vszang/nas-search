@@ -70,25 +70,26 @@ src/rag_system.py
 
 ## 4. 알려진 문제 및 제한사항
 
-### ⚠️ Claude API 크레딧 부족
-- **원인**: Anthropic API 계정의 크레딧이 없음
-- **현재 상태**: 테스트 응답 모드로 작동
-- **해결 방법**: Anthropic API 크레딧 충전 필요
+### ⚠️ Claude/Gemini API 한도
+- **원인**: Claude API 크레딧 부족 / Gemini 무료 할당량 초과
+- **현재 상태**: 아키텍처는 정상, API 크레딧 확보 후 실사용 가능
+- **해결 방법**: Anthropic API 크레딧 충전
 
-### ⚠️ RAG 벡터 검색 (현재 비활성)
-- **상태**: 모델 로드 문제로 초기화 실패
-- **원인**: Hugging Face 모델 다운로드 경로 문제
-- **영향**: 벡터 검색 기반 파일 검색 미사용
-- **개선 계획**: 
-  1. 모델 경로 수정
-  2. 로컬 모델 캐시 설정
-  3. Elasticsearch 연결 안정화
+### ✅ RAG 벡터 검색 (2026-04-13 활성화 완료)
+- **상태**: 정상 동작
+- **해결된 문제**:
+  1. 잘못된 모델명 수정: `multilingual-MiniLM-L6-v2` → `paraphrase-multilingual-MiniLM-L12-v2`
+  2. ES 8.x 호환 API 수정: `doc_type` 제거, `body=` → `document=`
+  3. OpenSearch 전용 `index.knn` 설정 제거
+  4. 빈 `modified_date` 파싱 오류 수정
+- **패키지 버전**: torch 2.2.0+cpu / sentence-transformers 3.3.1 / numpy<2
+- **테스트 결과**: 인덱싱 및 한국어 벡터 검색 정상 동작 확인
 
 ## 5. Flask 서버 시작 명령
 
 ```bash
 # 프로젝트 디렉토리로 이동
-cd c:\Task\MCP\projects\intranet-nas-search
+cd c:\Task\MCP\projects\nas-search
 
 # Flask 서버 시작
 venv\Scripts\python app.py
@@ -104,14 +105,14 @@ venv\Scripts\python app.py
 - [x] 테스트 응답 모드 구현
 
 ### 우선순위 2: [진행 중]
-- [ ] Vite 프론트엔드 실행 (localhost:3000)
-- [ ] UI에서 /api/chat 테스트
-- [ ] Claude API 크레딧 이슈 해결
+- [ ] NAS 파일 SMB 크롤링 구현 (crawler.py SMB 분기)
+- [ ] 크롤링 → ES + RAG 인덱싱 파이프라인 연결
+- [ ] 실제 파일로 end-to-end 검색 테스트
 
 ### 우선순위 3: [계획]
-- [ ] RAG 벡터 검색 활성화
-- [ ] NAS 파일 본격 인덱싱
-- [ ] 실제 파일 내용 기반 검색
+- [ ] Vite 프론트엔드 실행 (localhost:3000)
+- [ ] UI에서 /api/chat 테스트
+- [ ] Claude/Gemini API 크레딧 확보 후 실사용 테스트
 
 ## 7. 테스트 방법
 

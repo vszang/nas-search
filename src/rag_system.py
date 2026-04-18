@@ -39,7 +39,7 @@ class RAGSystem:
             # 벡터 임베딩 모델 로드
             # 작은 모델 사용 (빠른 응답)
             logger.info("벡터 임베딩 모델 로드 중...")
-            self.embedder = SentenceTransformer('multilingual-MiniLM-L6-v2')
+            self.embedder = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
             logger.info("벡터 임베딩 모델 로드 완료")
             
             self.index_name = "nas_documents"
@@ -107,13 +107,14 @@ class RAGSystem:
                 "content_vector": content_vector,
                 "file_type": file_type,
                 "file_size": file_size,
-                "modified_date": modified_date,
                 "nas_name": nas_name,
                 "indexed_at": datetime.now().isoformat()
             }
+            if modified_date:
+                doc["modified_date"] = modified_date
             
             # Elasticsearch에 인덱싱
-            self.es.index(index=self.index_name, doc_type="_doc", body=doc)
+            self.es.index(index=self.index_name, document=doc)
             
             logger.info(f"문서 인덱싱: {file_path}")
             return True

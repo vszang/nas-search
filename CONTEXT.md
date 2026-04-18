@@ -2,269 +2,121 @@
 
 ## 프로젝트 정의
 
-**프로젝트명**: 사내 NAS 검색 MCP (Intranet NAS Search MCP)
+**프로젝트명**: 사내 NAS 검색 시스템
 
-**목표**: 사내 NAS에 저장된 파일들을 효율적으로 검색 및 조회할 수 있는 MCP 서버 개발
+**목표**: 사내 NAS 파일을 Elasticsearch + Claude AI로 자연어 검색
 
-**대상 사용자**: 사내 개발팀, 콘텐츠 관리팀
+**아키텍처**: 풀스택 인덱싱 (Option 3)
+- SMB 크롤러로 NAS 파일 탐색 및 내용 추출
+- Elasticsearch에 메타데이터 + 내용 인덱싱
+- Claude API tool_use 패턴으로 자연어 → 도구 호출
+- Vue3 + Flask 웹 인터페이스
 
 ## 기술 스택
 
-| 항목 | 상태 | 선택 |
-|------|------|--------|
-| 프로그래밍 언어 | ✅ 결정 | Python 3.10+ |
-| MCP SDK | ✅ 결정 | Anthropic MCP SDK (Python) |
-| NAS 접근 방식 | ✅ 결정 | Python SMB 라이브러리 (smbclient) |
-| 파일 인덱싱 | ✅ 결정 | Elasticsearch 8.11.0 |
-| 검색 엔진 | ✅ 결정 | Elasticsearch (풀스택 인덱싱 + 전문검색) |
-| 크롤러 | ✅ 결정 | 백그라운드 스레드 기반 |
+| 항목 | 선택 | 버전 |
+|------|------|------|
+| 언어 | Python | 3.12 |
+| NAS 접근 | smbprotocol / smbclient | 1.16.1 |
+| 검색 엔진 | Elasticsearch (Docker) | 8.11.0 |
+| RAG 임베딩 | sentence-transformers | 3.3.1 |
+| 딥러닝 | torch (CPU) | 2.2.0+cpu |
+| AI (기본) | Claude Haiku | claude-haiku-4-5-20251001 |
+| AI (고성능) | Claude Sonnet | claude-sonnet-4-6 |
+| 웹 백엔드 | Flask + flask-cors | 3.1.x |
+| 프론트엔드 | Vue3 + Vuetify + Vite | - |
+| MCP SDK | mcp | 1.27.0 |
 
 ## 환경 정보
 
-- **서버**: Windows Server (사내)
-- **NAS 1**: Synology
-- **NAS 2**: 기타 NAS
-- **접근 방식**: 사내 IP + 계정/비밀번호
-- **프로토콜**: SMB/CIFS (추정)
+- **개발 서버**: Windows 10 Pro (현재 VM)
+- **배포 서버**: 별도 서버 (IIS, 외부 IP 보유)
+- **Elasticsearch**: Docker 컨테이너 (port 9200)
+- **NAS**: Synology (SMB 포트 445)
 
-## NAS 접근 방식 비교 및 선택
+## 주요 설계 결정
 
-### 옵션 A: Windows 네트워크 드라이브 마운트
-**방식**: 서버에서 네트워크 드라이브로 NAS를 마운트하여 로컬 파일시스템처럼 접근
+### 검색 방식
+- 파일명 + 내용 통합 검색 (should = OR)
+- 파일명 매칭 가중치 2배 (boost: 2)
+- `searcher.py` → `search_by_keyword()` 메서드
 
-**장점**
-- ✅ 구현이 간단함 (로컬 파일 시스템 API 사용)
-- ✅ Windows에 최적화됨
-- ✅ 기존 권한 관리 시스템 활용 가능
+### preview_file 우선순위
+1. Elasticsearch에 저장된 content (path keyword 정확 매칭)
+2. 로컬 텍스트 파일 직접 읽기
+3. SMB content_extractor 실시간 추출 (세션 재연결 후)
 
-**단점**
-- ❌ 서버 종속성 높음 (서버 환경 변경 시 재설정 필요)
-- ❌ 여러 NAS 동시 관리 어려움 (마운트 포인트 관리)
-- ❌ 권한 분리 어려움 (서버 계정으로만 접근)
-
-### 옵션 B: Python SMB 라이브러리 사용 ⭐ **추천**
-**방식**: Python의 `smbclient`, `pysmb` 등 라이브러리로 직접 SMB 프로토콜 구현
-
-**장점**
-- ✅ 이식성 높음 (Windows, Linux, Mac 모두 동작)
-- ✅ 유연한 인증 (여러 계정 동시 관리)
-- ✅ 프로그래밍 학습에 효과적
-- ✅ MCP와의 통합이 깔끔함
-- ✅ 여러 NAS 동시 관리 용이
-
-**단점**
-- ❌ 초기 구현이 다소 복잡함
-- ❌ 라이브러리 문제 시 디버깅 필요
-
-**선택 이유**: 프로젝트가 타서버/환경으로 이동 가능하고, 여러 NAS를 관리하며, 교육 목적도 있으므로 **옵션 B 권장**
-
-## 배포 및 통합 방식
-
-### 웹사이트 통합
-- **가능성**: ✅ 완전히 가능
-- **아키텍처**: 웹 백엔드 → Claude API → MCP 서버 → NAS
-- **무료 AI API**: Claude, Gemini, GPT 모두 사용 가능
-- **상세 가이드**: [docs/WEB-INTEGRATION.md](../docs/WEB-INTEGRATION.md)
-
-### 권장 구성
-- **1순위 AI API**: Claude (MCP 공식 지원)
-- **2순위 백업**: Gemini (무료 크레딧 많음)
-- **웹 백엔드**: Flask/Django (Python)
-- **프론트엔드**: React/Vue (선택사항)
-
-## 요구사항 (초안)
-
-### 기능 요구사항
-
-1. **NAS 연결**
-   - [ ] 사내 NAS에 접근 가능성 확인
-   - [ ] 인증 방식 결정 (도메인 계정, 전용 계정 등)
-   - [ ] 보안 설정 (암호화, 권한 관리)
-
-2. **파일 검색**
-   - [ ] 파일명으로 검색
-   - [ ] 내용 기반 검색 (텍스트 파일)
-   - [ ] 메타데이터 검색 (수정일, 크기, 소유자 등)
-   - [ ] 결과 페이지네이션
-
-3. **파일 조회**
-   - [ ] 파일/폴더 목록 조회
-   - [ ] 파일 정보 조회
-   - [ ] 파일 미리보기 (텍스트 파일)
-
-4. **MCP 인터페이스**
-   - [ ] Tools: 검색, 조회 등의 도구 제공
-   - [ ] Resources: 파일 리소스 제공
-   - [ ] Prompts: 검색 관련 프롬프트 템플릿
-
-### 비기능 요구사항
-
-- **성능**: 대량의 파일 검색 시 1초 이내 응답
-- **신뢰성**: 시스템 안정성 확보
-- **보안**: 사용자 권한 관리, 데이터 보호
-- **유지보수성**: 명확한 코드 구조, 문서화
-
-## 환경 정보
-
-- **NAS 위치**: 사내 NAS (상세 정보 필요)
-- **NAS 프로토콜**: SMB/CIFS (예상, 확인 필요)
-- **접근 방식**: 윈도우 도메인 계정 기반 (예상, 확인 필요)
-
-## 설계 결정사항
-
-| 결정사항 | 상태 | 관련 문서 |
-|---------|------|---------|
-| 프로그래밍 언어 선택 | ✅ Python 3.10+ | - |
-| NAS 연결 방식 | ✅ Python SMB 라이브러리 | - |
-| 고수준 아키텍처 | 🔄 검토중 | 아래 옵션 참고 |
-
-## 개발 환경 정보
-
-- **로컬 개발**: D:\Source (주요 경로)
-- **서버**: Windows Server 2019 (Hyper-V VM)
-- **네트워크**: HTTPS/SSL 지원 가능
-- **리소스**: 
-  - 그래픽카드: 없음
-  - RAM 여유: ~350GB
-
-## 고수준 아키텍처 (H-Level Design)
-
-### 옵션 1: 단순 패스스루 (Simple Passthrough) ⭐ **추천**
+### AI 클라이언트 구조
 ```
-Claude → MCP Server → SMB Library → NAS (Synology/Others)
-```
-**특징**
-- 아키텍처: 직선적, MCP 서버가 요청을 직접 NAS로 전달
-- 캐싱: 없음 (실시간 조회)
-- 상태 관리: 최소화
-
-**적합한 경우**
-- ✅ 사용 빈도가 낮음
-- ✅ 파일이 자주 변함
-- ✅ 빠른 개발 필요
-
-**구현 복잡도**: 낮음 (1-2주)
-
----
-
-### 옵션 2: 캐시 계층 포함 (Caching Layer)
-```
-Claude → MCP Server → {캐시(SQLite) / SMB Library} → NAS
-         ↑_______________|
-         (메타데이터 캐시)
-```
-**특징**
-- 아키텍처: 파일 메타데이터 캐싱
-- 캐싱: SQLite로 파일 목록/메타데이터 캐시
-- 상태 관리: 주기적 갱신(Polling)
-
-**적합한 경우**
-- ✅ 파일 목록 조회가 많음
-- ✅ 약간의 지연 허용 (몇 분)
-- ✅ 중간 규모 NAS
-
-**구현 복잡도**: 중간 (2-3주)
-
-**주의사항**
-- 캐시 유효성 문제 (수동 갱신 필요)
-- 대용량 파일 목록 시 메모리 사용량 증가
-
----
-
-### 옵션 3: 풀스택 캐싱 + 인덱싱 (Full-Stack Caching + Indexing)
-```
-Claude → MCP Server → {인덱싱 엔진 / 검색 캐시} → NAS
-         ↑________________|
-         (파일 내용 인덱싱)
-         
-백그라운드: 크롤러 → 파일 입수 → 인덱싱 → 저장소
-```
-**특징**
-- 아키텍처: 별도 크롤러 + 인덱싱 엔진
-- 캐싱: 전문 검색 엔진 (Elasticsearch 또는 SQLite FTS)
-- 상태 관리: 복잡함
-
-**적합한 경우**
-- ✅ 파일 내용 검색 필요
-- ✅ 대규모 NAS (수백만 파일)
-- ✅ 고성능 필요
-
-**구현 복잡도**: 높음 (4주 이상)
-
----
-
-## 아키텍처 선택 기준
-
-| 구분 | 옵션 1 | 옵션 2 | 옵션 3 |
-|------|-------|-------|-------|
-| **개발 시간** | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ |
-| **유지보수** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
-| **성능** | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| **복잡도** | 낮음 | 중간 | 높음 |
-| **학습 가치** | 중간 | 높음 | 매우 높음 |
-
-## 권장 사항
-
-**🎯 현 프로젝트 선택: 옵션 3 (풀스택 인덱싱)** ✅ **최종 선택**
-1. 리소스 충분: 350GB RAM으로 대규모 인덱싱 가능
-2. 교육적 가치: Elasticsearch, 크롤링, 인덱싱 고급 기술 학습
-3. 성능: 검색 시간 25배 향상 (2500ms → 100ms)
-4. 포트폴리오: 엔터프라이즈급 중급~상급 프로젝트
-
-참고: [docs/FINAL-DECISION.md](docs/FINAL-DECISION.md)에서 전체 비교 분석 참조
-
----
-
-## Phase 3: Claude API 통합
-
-### 목표
-자연언어 쿼리를 통해 MCP 도구를 자동으로 호출하는 Claude API 통합
-
-### Claude API 클라이언트 구현
-
-**파일 위치:** `src/claude_integration.py`
-
-**클래스:** `ClaudeNASSearchClient`
-
-**주요 메서드:**
-- `__init__()`: API key 검증, Anthropic 클라이언트 초기화, MCP 서버 실행
-- `get_tools_schema()`: 4개 MCP 도구를 JSON Schema 형식으로 반환
-- `chat(message)`: 사용자 메시지 처리, Claude API 호출, 도구 자동 실행
-- `interactive_chat()`: 대화형 REPL 루프
-- `clear_history()`: 대화 기록 초기화
-- `get_history()`: 대화 기록 조회
-
-**특징:**
-- ✅ 자동 도구 호출 (tool_use 응답 처리)
-- ✅ 다중 턴 대화 지원
-- ✅ 메시지 히스토리 관리
-- ✅ 포괄적 에러 처리
-- ✅ 다국어 시스템 프롬프트
-
-### 사용 방법
-
-**1. API Key 설정**
-```bash
-export ANTHROPIC_API_KEY="sk-ant-v3xxxxx..."
+AIClient (추상 클래스)
+├── ClaudeNASSearchClient   ← 현재 사용
+├── GeminiNASSearchClient   ← 구현됨
+└── (추후) LlamaCppClient   ← Gemma4 로컬 모델
 ```
 
-**2. 대화형 채팅 시작**
-```bash
-python example_chat.py
+### 파일 내용 추출 (content_extractor.py)
+- PDF: pdfplumber
+- DOCX: python-docx
+- XLSX: openpyxl
+- PPTX: python-pptx
+- HWP: olefile PrvText 스트림 (UTF-16-LE) → pyhwp CLI 폴백
+- 텍스트: utf-8 → cp949 → euc-kr → latin-1 순차 시도
+- SMB 파일: 임시 파일 다운로드 후 파싱 → 삭제
+
+### 인덱싱 전략
+- ES 인덱스: `nas_files` (메타데이터 + 내용)
+- RAG 인덱스: `nas_documents_v2` (벡터 임베딩)
+- 최대 내용 크기: 5MB (다운로드), 50,000자 (인덱싱)
+- 누적 인덱싱: 기존 데이터 유지하며 새 파일 추가
+
+## 배포 구성
+
+### Flask VM (현재 서버)
+- Flask: `start_server.bat` → port 5000
+- Elasticsearch: Docker (port 9200)
+- 인덱싱: `run_index.bat` / `run_index_reset.bat`
+
+### 배포 서버 (IIS)
+- Frontend: `dist/` 정적 파일 서빙
+- URL Rewrite: `/api/*` → Flask VM 내부 IP:5000
+- ARR 프록시 필요
+
+## ES 인덱스 매핑
+
+```
+nas_files:
+  path: keyword          ← 정확 매칭 (term query)
+  name: text + keyword   ← 전문검색 + 집계
+  content: text          ← 전문검색 (korean_analyzer)
+  file_type: keyword
+  size: long
+  modified: date
+  nas_name: keyword
+  indexed_at: date
 ```
 
-**3. 테스트 실행**
-```bash
-python test_claude_integration.py
+## 환경변수 (.env)
+
+```
+NAS_HOST_1=192.168.0.101
+NAS_SHARE_1=nas
+NAS_START_PATH_1=test
+NAS_USERNAME_1=admin
+NAS_PASSWORD_1=...
+NAS_NAME_1=Main NAS
+
+ELASTICSEARCH_HOST=localhost
+ELASTICSEARCH_PORT=9200
+ELASTICSEARCH_INDEX_NAME=nas_files
+
+ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_API_KEY=...
+
+# LOCAL_NAS_PATH_1=C:\Source  ← 주석처리 = SMB 모드
 ```
 
-### 설정 가이드
-자세한 API 설정 방법은 [docs/PHASE3-API-SETUP.md](docs/PHASE3-API-SETUP.md) 참조
+## 다음 계획
 
----
-
-## 참고 자료
-
-- [Anthropic MCP 공식 문서](https://modelcontextprotocol.io/)
-- [Claude API Documentation](https://docs.anthropic.com)
-- [사내 NAS 관련 문서 (필요시 추가)]
+1. **MCP 표준 서버** (`mcp_server_stdio.py`) - Claude Desktop 연결
+2. **로컬 LLM** (`llama_cpp_integration.py`) - Gemma4 via llama-cpp-python
+3. **자동 인덱싱** - Windows 작업 스케줄러

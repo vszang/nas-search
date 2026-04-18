@@ -163,9 +163,9 @@ class NASSearchMCPServer:
         try:
             logger.info(f"[search_files] query={query}, file_type={file_type}, max_results={max_results}")
             
-            # Elasticsearch 고급 검색 호출
-            results = self.searcher.search_advanced(
-                name=query if query else None,
+            # 파일명 + 내용 통합 검색
+            results = self.searcher.search_by_keyword(
+                query=query,
                 file_type=file_type,
                 max_results=max_results
             )
@@ -446,44 +446,79 @@ class NASSearchMCPServer:
             }
         """
         start_time = time.time()
-        
+
         try:
             # 경로 보안 검증
             if ".." in file_path or file_path.startswith(".."):
                 return self._error_response("INVALID_PATH", "Path traversal not allowed")
-            
+
             logger.info(f"[preview_file] file_path={file_path}, max_bytes={max_bytes}")
-            
-            # 파일 존재 확인
-            if not os.path.exists(file_path):
+
+            # 파일 존재 확인 (로컬) — SMB 경로는 존재 확인 생략
+            is_smb = file_path.startswith("\\\\")
+            if not is_smb and not os.path.exists(file_path):
                 return self._error_response("FILE_NOT_FOUND", f"File not found: {file_path}")
-            
-            # 파일 크기 확인
-            file_size = os.path.getsize(file_path)
-            if file_size > 5 * 1024 * 1024:  # 5MB 이상이면 처음 1KB만
-                max_bytes = min(max_bytes, 1024)
-            
-            # 텍스트 파일 판단
-            if not self._is_text_file(file_path):
-                return self._error_response("UNSUPPORTED_TYPE", 
-                    f"File type not supported for preview: {os.path.splitext(file_path)[1]}")
-            
-            # 인코딩 감지 및 읽기
-            encoding = self._detect_encoding(file_path)
-            
-            with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
-                content = f.read(max_bytes)
-            
-            # 잘림 여부 판단
-            truncated = file_size > max_bytes
-            
-            # 라인 수 계산
+
+            file_size = os.path.getsize(file_path) if not is_smb else 0
+
+            from .content_extractor import is_extractable, TEXT_EXTENSIONS
+            from pathlib import Path
+
+            ext = Path(file_path).suffix.lower()
+            content = ""
+            encoding = "utf-8"
+
+            # 1순위: Elasticsearch에 이미 인덱싱된 content 사용 (path keyword 정확 매칭)
+            try:
+                from .config import ELASTICSEARCH as ES_CFG
+                res = self.indexer.client.search(
+                    index=ES_CFG.index_name,
+                    query={"term": {"path": file_path}},
+                    _source=["content"],
+                    size=1
+                )
+                hits = res["hits"]["hits"]
+                if hits:
+                    content = hits[0]["_source"].get("content", "")
+                    if content:
+                        encoding = "elasticsearch"
+                        logger.info(f"[preview_file] ES content 조회 성공: {len(content)}자")
+            except Exception as es_err:
+                logger.warning(f"[preview_file] ES content 조회 실패: {es_err}")
+
+            # 2순위: 로컬 파일 직접 읽기 (텍스트 파일)
+            if not content and not is_smb and ext in TEXT_EXTENSIONS:
+                encoding = self._detect_encoding(file_path)
+                with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
+                    content = f.read(max_bytes)
+
+            # 3순위: SMB content_extractor (실시간 추출)
+            if not content and is_extractable(file_path):
+                try:
+                    # SMB 세션 재연결 시도
+                    for crawler in self.crawler.crawlers:
+                        crawler.connect()
+                    from .content_extractor import extract_content
+                    content = extract_content(file_path, file_size=file_size)
+                    if content:
+                        encoding = "extracted"
+                except Exception as ext_err:
+                    logger.warning(f"[preview_file] content_extractor 실패: {ext_err}")
+
+            if not content:
+                return self._error_response(
+                    "PREVIEW_EMPTY",
+                    f"내용을 추출할 수 없습니다. (형식: {ext})"
+                )
+
+            truncated = len(content) > max_bytes
+            content = content[:max_bytes]
+
             lines = len(content.split('\n'))
-            
             elapsed_ms = (time.time() - start_time) * 1000
-            
+
             logger.info(f"[preview_file] 성공: {lines} lines, truncated={truncated}, {elapsed_ms:.2f}ms")
-            
+
             return self._success_response({
                 "name": os.path.basename(file_path),
                 "content": content,

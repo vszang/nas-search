@@ -47,7 +47,7 @@ class ClaudeNASSearchClient(AIClient):
         
         # Claude 클라이언트 초기화
         self.client = Anthropic(api_key=api_key)
-        self.model = "claude-3-5-sonnet-20241022"
+        self.model = "claude-haiku-4-5-20251001"  # 기본 모델
         
         # MCP 서버 초기화
         Config.validate()
@@ -60,10 +60,15 @@ class ClaudeNASSearchClient(AIClient):
         self.system_prompt = """당신은 사내 NAS 파일 검색 어시스턴트입니다.
 
 사용자의 질문에 답하기 위해 다음 도구들을 사용할 수 있습니다:
-- search_files: 파일명, 내용, 필터로 파일 검색
+- search_files: 파일명 또는 파일 내용으로 검색
 - list_directory: 디렉토리 탐색 및 파일 목록 조회
 - get_file_info: 특정 파일의 상세 정보 조회
-- preview_file: 텍스트 파일 미리보기
+- preview_file: 파일 내용 미리보기 (PDF, DOCX, XLSX, PPTX, HWP, TXT, CSV, JSON, 코드 등 지원)
+
+중요 규칙:
+- 파일 내용에 대해 질문받으면 반드시 preview_file 도구를 호출하세요. 스스로 "지원 안 된다"고 판단하지 마세요.
+- PDF, 엑셀, 워드, 파워포인트, HWP 파일도 preview_file로 내용 추출이 가능합니다.
+- 파일을 찾은 후 내용 요약이나 확인이 필요하면 preview_file을 추가로 호출하세요.
 
 사용자의 요청을 분석하고 적절한 도구를 호출하여 답변을 제공하세요.
 결과는 자연스럽고 유용한 한국어로 설명해주세요."""
@@ -166,8 +171,10 @@ class ClaudeNASSearchClient(AIClient):
             {
                 "name": "preview_file",
                 "description": (
-                    "텍스트 파일의 내용을 미리봅니다. "
-                    "인코딩을 자동으로 감지하고, 큰 파일은 자동으로 잘립니다."
+                    "파일 내용을 미리봅니다. "
+                    "PDF, DOCX, XLSX, PPTX, HWP, TXT, CSV, JSON, 코드 파일 등 다양한 형식을 지원합니다. "
+                    "PDF와 오피스 문서는 텍스트를 자동 추출합니다. "
+                    "파일 내용 확인이나 요약이 필요할 때 반드시 이 도구를 호출하세요."
                 ),
                 "input_schema": {
                     "type": "object",
@@ -192,18 +199,21 @@ class ClaudeNASSearchClient(AIClient):
             }
         ]
     
-    def chat(self, user_message: str) -> str:
+    def chat(self, user_message: str, model: str = None) -> str:
         """
         사용자와 대화
-        
+
         Args:
             user_message: 사용자의 메시지
-        
+            model: 사용할 모델 (None이면 기본 모델 사용)
+
         Returns:
             str: Claude의 응답
         """
-        logger.info(f"[User] {user_message}")
-        
+        if model:
+            self.model = model
+        logger.info(f"[User] {user_message} | model={self.model}")
+
         # 대화 히스토리에 사용자 메시지 추가
         self.conversation_history.append({
             "role": "user",
@@ -262,10 +272,15 @@ class ClaudeNASSearchClient(AIClient):
             for content in response.content:
                 if content.type == "tool_use":
                     logger.info(f"  - Calling {content.name} with {content.input}")
-                    
+                    print(f"[TOOL CALL] {content.name} | input: {content.input}", flush=True)
+
                     # 도구 실행
                     result = self._execute_tool(content.name, content.input)
-                    
+
+                    result_preview = json.dumps(result, ensure_ascii=False)[:300]
+                    print(f"[TOOL RESULT] {content.name} | result: {result_preview}", flush=True)
+                    logger.info(f"  - Result: {result_preview}")
+
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": content.id,

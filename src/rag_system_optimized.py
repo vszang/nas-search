@@ -54,7 +54,7 @@ class RAGSystemOptimized:
             
             # 벡터 임베딩 모델 로드
             logger.info("📊 벡터 임베딩 모델 로드 중...")
-            self.embedder = SentenceTransformer('multilingual-MiniLM-L6-v2')
+            self.embedder = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
             
             # 배치 인코딩을위한 설정
             self.embedder.max_seq_length = 256  # 처리 속도 향상
@@ -129,11 +129,7 @@ class RAGSystemOptimized:
             index_body = {
                 "settings": {
                     "number_of_shards": 1,
-                    "number_of_replicas": 0,
-                    "index": {
-                        "knn": True,  # KNN 벡터 검색 활성화
-                        "knn.algo_param.ef_construction": 128  # 인덱싱 정확도
-                    }
+                    "number_of_replicas": 0
                 },
                 "mappings": {
                     "properties": {
@@ -187,13 +183,14 @@ class RAGSystemOptimized:
                 "content_vector": content_vector,
                 "file_type": file_type,
                 "file_size": file_size,
-                "modified_date": modified_date,
                 "nas_name": nas_name,
                 "indexed_at": datetime.now().isoformat()
             }
+            if modified_date:
+                doc["modified_date"] = modified_date
             
             # Elasticsearch에 인덱싱
-            self.es.index(index=self.index_name, doc_type="_doc", body=doc)
+            self.es.index(index=self.index_name, document=doc)
             return True
             
         except Exception as e:
@@ -227,32 +224,30 @@ class RAGSystemOptimized:
             
             # 벌크 인덱싱
             from elasticsearch.helpers import bulk
-            
+
             actions = []
             for doc, vector in zip(documents, vectors):
-                if vector:
-                    actions.append({
-                        "_index": self.index_name,
-                        "_type": "_doc",
-                        "_source": {
-                            **doc,
-                            "content_vector": vector,
-                            "indexed_at": datetime.now().isoformat()
-                        }
-                    })
-            
-            # 벌크 작업 실행
-            for success, info in bulk(self.es, actions, chunk_size=50):
-                if success:
-                    success_count += 1
-                else:
+                if not vector:
                     failure_count += 1
-            
-            logger.info(f"📦 배치 인덱싱 완료: {success_count}개 성공, {failure_count}개 실패")
+                    continue
+                # modified_date 빈 문자열 제거 (ES date 파싱 오류 방지)
+                source = {k: v for k, v in doc.items() if not (k == "modified_date" and not v)}
+                source["content_vector"] = vector
+                source["indexed_at"] = datetime.now().isoformat()
+                actions.append({"_index": self.index_name, "_source": source})
+
+            # raise_on_error=False: 일부 실패해도 계속 진행
+            success_count, errors = bulk(
+                self.es, actions, chunk_size=50,
+                raise_on_error=False, stats_only=True
+            )
+            failure_count += errors
+
+            logger.info(f"배치 인덱싱 완료: {success_count}개 성공, {failure_count}개 실패")
             return success_count, failure_count
-            
+
         except Exception as e:
-            logger.error(f"❌ 배치 인덱싱 실패: {str(e)}")
+            logger.error(f"배치 인덱싱 실패: {str(e)}")
             return 0, len(documents)
     
     def search(self, query: str, top_k: int = 5, min_score: Optional[float] = None) -> List[Dict[str, Any]]:
